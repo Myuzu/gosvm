@@ -16,11 +16,10 @@ import (
 const (
 	frameBufferSize  = 110 // Buffer size to hold past frames
 	maxCameraRetries = 5   // Maximum number for exponential read retries
-	minBlendOffset   = 1   // Minimum delay
-	maxBlendOffset   = 109 // Maximum delay
+	minBlendOffset   = 1   // Minimum frame delay
+	maxBlendOffset   = 109 // Maximum frame delay
 )
 
-var faceDetectColor = color.RGBA{0, 255, 0, 70}
 var fpsCounterColor = color.RGBA{0, 255, 0, 0}
 
 type FPSCalculator struct {
@@ -86,6 +85,15 @@ func main() {
 	// Current frame index inside the frameBuffer
 	currentIndex := 0
 
+	// State to check if the frame is frozen
+	freezeFrame := false
+
+	// Frame to compare with
+	mainFrame := gocv.NewMat()
+
+	// frozenFrame
+	frozenFrame := gocv.NewMat()
+
 	for {
 		currentFrame := gocv.NewMat()
 
@@ -104,17 +112,31 @@ func main() {
 			frameBuffer[currentIndex].Close()
 		}
 
-		// Denoise captured image
+		// Denoise currentFrame
 		gocv.FastNlMeansDenoisingColoredWithParams(currentFrame, &currentFrame, 28.0, 12.0, 12, 7)
 
 		// Store the current frame in the buffer
 		frameBuffer[currentIndex] = currentFrame.Clone()
 		currentFrame.Close()
 
+		if !freezeFrame {
+			mainFrame = frameBuffer[currentIndex]
+			frozenFrame = frameBuffer[currentIndex]
+		} else {
+			mainFrame = frozenFrame
+		}
+
+		// gocv.Multiply(mainFrame, gocv.NewMatWithSizeFromScalar(
+		// 	gocv.NewScalar(0.5, 0.5, 0.5, 0),
+		// 	mainFrame.Rows(),
+		// 	mainFrame.Cols(),
+		// 	mainFrame.Type()), &mainFrame)
+
+		// mainFrame.MultiplyFloat(0.5) //.CopyTo(&mainFrame)
+
 		// Determine the frame to blend with based on the desired delay
 		blendIndex := (currentIndex - blendOffset + frameBufferSize) % frameBufferSize
 		blendFrame := frameBuffer[blendIndex]
-		originalFrame := frameBuffer[currentIndex]
 
 		if !blendFrame.Empty() {
 			// Create a half-transparent inverted version of the frame to blend
@@ -122,12 +144,12 @@ func main() {
 
 			// Invert the frame
 			gocv.BitwiseNot(blendFrame, &halfTransparentFrame)
-			gocv.AddWeighted(halfTransparentFrame, 0.5, originalFrame, 0.0, 0, &halfTransparentFrame)
+			gocv.AddWeighted(halfTransparentFrame, 0.5, mainFrame, 0.0, 0, &halfTransparentFrame)
 
 			// Blend the current frame with the delayed frame
 			blendedFrame := gocv.NewMat()
 
-			blendFrames(originalFrame, halfTransparentFrame, &blendedFrame, 0.4)
+			blendFrames(mainFrame, halfTransparentFrame, &blendedFrame, 0.4)
 
 			// Apply emobss effect
 			applyEmbossEffect(blendedFrame, &blendedFrame)
@@ -135,7 +157,7 @@ func main() {
 			// Calculate FPS
 			if fpsCalculator != nil {
 				fps := fpsCalculator.calculateFPS()
-				gocv.PutText(&blendedFrame, fmt.Sprintf("FPS: %.2f, Delay: %d (A/D keys to inc/dec)", fps, blendOffset), image.Pt(10, 40), gocv.FontHersheyPlain, 1.9, fpsCounterColor, 2)
+				gocv.PutText(&blendedFrame, fmt.Sprintf("FPS: %.2f, Delay: %d (A/D keys to inc/dec), Freeze: %t", fps, blendOffset, freezeFrame), image.Pt(10, 40), gocv.FontHersheyPlain, 1.9, fpsCounterColor, 2)
 			}
 
 			// Display the resulting frame in the window
@@ -161,6 +183,8 @@ func main() {
 			if blendOffset < maxBlendOffset {
 				blendOffset++
 			}
+		} else if key == 32 { // Spacebar key to togle freeze frame
+			freezeFrame = !freezeFrame
 		}
 
 		time.Sleep(30 * time.Millisecond)
