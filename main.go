@@ -9,11 +9,12 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/pkg/profile"
 	"gocv.io/x/gocv"
 )
 
 const (
-	frameBufferSize  = 325 // Buffer size to hold past frames
+	frameBufferSize  = 110 // Buffer size to hold past frames
 	maxCameraRetries = 5   // Maximum number for exponential read retries
 )
 
@@ -44,7 +45,8 @@ func (fpsCalc *FPSCalculator) calculateFPS() float64 {
 }
 
 func main() {
-	if len(os.Args) < 4 {
+	defer profile.Start(profile.MemProfile).Stop()
+	if len(os.Args) < 3 {
 		fmt.Println("How to run:\n\n\tgosvm [camera ID] blendOffset")
 		return
 	}
@@ -69,6 +71,7 @@ func main() {
 
 	// Prepare a buffer to hold past frames
 	frameBuffer := make([]gocv.Mat, frameBufferSize)
+	// var frameBuffer [325]gocv.Mat
 	for i := range frameBuffer {
 		frameBuffer[i] = gocv.NewMat()
 	}
@@ -86,7 +89,6 @@ func main() {
 
 	for {
 		currentFrame := gocv.NewMat()
-		defer currentFrame.Close()
 
 		if !ReadWebcamWithRetry(webcam, &currentFrame, maxCameraRetries) {
 			fmt.Println("Failed to read from webcam after multiple attempts")
@@ -105,6 +107,7 @@ func main() {
 
 		// Store the current frame in the buffer
 		frameBuffer[currentIndex] = currentFrame.Clone()
+		currentFrame.Close()
 
 		// Determine the frame to blend with based on the desired delay
 		blendIndex := (currentIndex - blendOffset + frameBufferSize) % frameBufferSize
@@ -113,19 +116,17 @@ func main() {
 		if !blendFrame.Empty() {
 			// Create a half-transparent inverted version of the frame to blend
 			halfTransparentFrame := gocv.NewMat()
-			defer halfTransparentFrame.Close()
 
 			gocv.BitwiseNot(blendFrame, &halfTransparentFrame)
-			gocv.AddWeighted(halfTransparentFrame, 0.5, currentFrame, 0.0, 0, &halfTransparentFrame)
+			gocv.AddWeighted(halfTransparentFrame, 0.5, frameBuffer[currentIndex], 0.0, 0, &halfTransparentFrame)
 
 			// Apply emobss effect
 			// applyEmbossEffect(halfTransparentFrame, &halfTransparentFrame)
 
 			// Blend the current frame with the delayed frame
 			blendedFrame := gocv.NewMat()
-			defer blendedFrame.Close()
 
-			blendFrames(currentFrame, halfTransparentFrame, &blendedFrame, 0.4)
+			blendFrames(frameBuffer[currentIndex], halfTransparentFrame, &blendedFrame, 0.4)
 
 			// Calculate FPS
 			if fpsCalculator != nil {
@@ -135,6 +136,9 @@ func main() {
 
 			// Display the resulting frame in the window
 			window.IMShow(blendedFrame)
+
+			blendedFrame.Close()
+			halfTransparentFrame.Close()
 		}
 
 		// Move to the next index in the circular buffer
@@ -144,6 +148,8 @@ func main() {
 		if window.WaitKey(10) >= 0 {
 			break
 		}
+
+		time.Sleep(30 * time.Millisecond)
 	}
 }
 

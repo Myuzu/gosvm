@@ -1,5 +1,15 @@
-build:
-	go build -o build/gosvm main.go
+BINARY_NAME=gosvm
 
-run:
-	go run main.go
+.PHONY: build
+build:
+	go build -o build/${BINARY_NAME} main.go
+
+.PHONY: clean
+clean:
+	go clean
+	rm build/${BINARY_NAME}
+
+.PHONY: dep
+dep:
+	go mod download
+	go mod verify
