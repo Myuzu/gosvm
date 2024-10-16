@@ -4,18 +4,20 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"log"
 	"math"
 	"os"
 	"strconv"
 	"time"
 
-	"github.com/pkg/profile"
 	"gocv.io/x/gocv"
 )
 
 const (
 	frameBufferSize  = 110 // Buffer size to hold past frames
 	maxCameraRetries = 5   // Maximum number for exponential read retries
+	minBlendOffset   = 1   // Minimum delay
+	maxBlendOffset   = 109 // Maximum delay
 )
 
 var faceDetectColor = color.RGBA{0, 255, 0, 70}
@@ -45,17 +47,15 @@ func (fpsCalc *FPSCalculator) calculateFPS() float64 {
 }
 
 func main() {
-	defer profile.Start(profile.MemProfile).Stop()
-	if len(os.Args) < 3 {
-		fmt.Println("How to run:\n\n\tgosvm [camera ID] blendOffset")
+	// defer profile.Start(profile.MemProfile).Stop()
+
+	if len(os.Args) < 2 {
+		fmt.Println("How to run:\n\n\tgosvm [camera ID]")
 		return
 	}
 
 	// Parse args
 	deviceID, _ := strconv.Atoi(os.Args[1])
-
-	// Number of frames to delay when blending
-	blendOffset, _ := strconv.Atoi(os.Args[2])
 
 	// Open webcam
 	webcam, err := gocv.VideoCaptureDevice(int(deviceID))
@@ -71,27 +71,26 @@ func main() {
 
 	// Prepare a buffer to hold past frames
 	frameBuffer := make([]gocv.Mat, frameBufferSize)
-	// var frameBuffer [325]gocv.Mat
 	for i := range frameBuffer {
 		frameBuffer[i] = gocv.NewMat()
 	}
 
 	// Initialize FPS calculator
-	var fpsCalculator *FPSCalculator
-
-	if len(os.Args) == 4 {
-		fpsCalculator = NewFPSCalculator()
-	}
+	fpsCalculator := NewFPSCalculator()
 
 	fmt.Printf("start reading camera device: %v\n", deviceID)
 
+	// Number of frames to delay when blending
+	blendOffset := 3
+
+	// Current frame index inside the frameBuffer
 	currentIndex := 0
 
 	for {
 		currentFrame := gocv.NewMat()
 
 		if !ReadWebcamWithRetry(webcam, &currentFrame, maxCameraRetries) {
-			fmt.Println("Failed to read from webcam after multiple attempts")
+			log.Fatal("Failed to read from webcam after multiple attempts")
 			break
 		}
 
@@ -105,6 +104,9 @@ func main() {
 			frameBuffer[currentIndex].Close()
 		}
 
+		// Denoise captured image
+		gocv.FastNlMeansDenoisingColoredWithParams(currentFrame, &currentFrame, 28.0, 12.0, 12, 7)
+
 		// Store the current frame in the buffer
 		frameBuffer[currentIndex] = currentFrame.Clone()
 		currentFrame.Close()
@@ -112,31 +114,34 @@ func main() {
 		// Determine the frame to blend with based on the desired delay
 		blendIndex := (currentIndex - blendOffset + frameBufferSize) % frameBufferSize
 		blendFrame := frameBuffer[blendIndex]
+		originalFrame := frameBuffer[currentIndex]
 
 		if !blendFrame.Empty() {
 			// Create a half-transparent inverted version of the frame to blend
 			halfTransparentFrame := gocv.NewMat()
 
+			// Invert the frame
 			gocv.BitwiseNot(blendFrame, &halfTransparentFrame)
-			gocv.AddWeighted(halfTransparentFrame, 0.5, frameBuffer[currentIndex], 0.0, 0, &halfTransparentFrame)
-
-			// Apply emobss effect
-			// applyEmbossEffect(halfTransparentFrame, &halfTransparentFrame)
+			gocv.AddWeighted(halfTransparentFrame, 0.5, originalFrame, 0.0, 0, &halfTransparentFrame)
 
 			// Blend the current frame with the delayed frame
 			blendedFrame := gocv.NewMat()
 
-			blendFrames(frameBuffer[currentIndex], halfTransparentFrame, &blendedFrame, 0.4)
+			blendFrames(originalFrame, halfTransparentFrame, &blendedFrame, 0.4)
+
+			// Apply emobss effect
+			applyEmbossEffect(blendedFrame, &blendedFrame)
 
 			// Calculate FPS
 			if fpsCalculator != nil {
 				fps := fpsCalculator.calculateFPS()
-				gocv.PutText(&blendedFrame, fmt.Sprintf("FPS: %.2f", fps), image.Pt(10, 30), gocv.FontHersheyPlain, 1.5, fpsCounterColor, 1)
+				gocv.PutText(&blendedFrame, fmt.Sprintf("FPS: %.2f, Delay: %d (A/D keys to inc/dec)", fps, blendOffset), image.Pt(10, 40), gocv.FontHersheyPlain, 1.9, fpsCounterColor, 2)
 			}
 
 			// Display the resulting frame in the window
 			window.IMShow(blendedFrame)
 
+			// Close Mats manualy
 			blendedFrame.Close()
 			halfTransparentFrame.Close()
 		}
@@ -144,9 +149,18 @@ func main() {
 		// Move to the next index in the circular buffer
 		currentIndex = (currentIndex + 1) % frameBufferSize
 
-		// Wait for a small delay to simulate time difference or until a key is pressed
-		if window.WaitKey(10) >= 0 {
+		// Handle user input to change the blend offset
+		key := window.WaitKey(10)
+		if key == 27 || key == 113 { // ESC or Q key to exit
 			break
+		} else if key == 97 { // "A" key decreses blendOffset
+			if blendOffset > minBlendOffset {
+				blendOffset--
+			}
+		} else if key == 100 { // "D" key increses blendOffset
+			if blendOffset < maxBlendOffset {
+				blendOffset++
+			}
 		}
 
 		time.Sleep(30 * time.Millisecond)

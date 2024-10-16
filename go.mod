@@ -4,7 +4,7 @@ go 1.22.5
 
 require (
 	github.com/pkg/profile v1.7.0
-	gocv.io/x/gocv v0.37.0
+	gocv.io/x/gocv v0.38.0
 )
 
 require (
