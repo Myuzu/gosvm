@@ -14,36 +14,14 @@ import (
 )
 
 const (
-	frameBufferSize  = 110 // Buffer size to hold past frames
-	maxCameraRetries = 5   // Maximum number for exponential read retries
-	minBlendOffset   = 1   // Minimum frame delay
-	maxBlendOffset   = 109 // Maximum frame delay
+	frameBufferSize    = 110 // Buffer size to hold past frames
+	defaultBlendOffset = 3   // Default number of frames to delay when blending
+	maxCameraRetries   = 5   // Maximum number for exponential read retries
+	minBlendOffset     = 1   // Minimum frame delay
+	maxBlendOffset     = 109 // Maximum frame delay
 )
 
-var fpsCounterColor = color.RGBA{0, 255, 0, 0}
-
-type FPSCalculator struct {
-	frameCount int
-	startTime  time.Time
-	fps        float64
-}
-
-func NewFPSCalculator() *FPSCalculator {
-	return &FPSCalculator{
-		startTime: time.Now(),
-	}
-}
-
-func (fpsCalc *FPSCalculator) calculateFPS() float64 {
-	fpsCalc.frameCount++
-	elapsedTime := time.Since(fpsCalc.startTime).Seconds()
-	if elapsedTime > 1.0 {
-		fpsCalc.fps = float64(fpsCalc.frameCount) / elapsedTime
-		fpsCalc.frameCount = 0
-		fpsCalc.startTime = time.Now()
-	}
-	return fpsCalc.fps
-}
+var HUDColor = color.RGBA{0, 255, 0, 0}
 
 func main() {
 	// defer profile.Start(profile.MemProfile).Stop()
@@ -56,7 +34,7 @@ func main() {
 	// Parse args
 	deviceID, _ := strconv.Atoi(os.Args[1])
 
-	// Open webcam
+	// Try to open video capture device
 	webcam, err := gocv.VideoCaptureDevice(int(deviceID))
 	if err != nil {
 		fmt.Println(err)
@@ -68,33 +46,17 @@ func main() {
 	window := gocv.NewWindow("Motion Extraction")
 	defer window.Close()
 
-	// Prepare a buffer to hold past frames
-	frameBuffer := make([]gocv.Mat, frameBufferSize)
-	for i := range frameBuffer {
-		frameBuffer[i] = gocv.NewMat()
-	}
+	// Initialize CircularFrameBuffer to hold past frames
+	frameBuffer := NewCircularFrameBuffer(frameBufferSize, defaultBlendOffset)
 
 	// Initialize FPS calculator
 	fpsCalculator := NewFPSCalculator()
 
-	fmt.Printf("start reading camera device: %v\n", deviceID)
+	fmt.Printf("Start reading from camera device: %v\n", deviceID)
 
-	// Number of frames to delay when blending
-	blendOffset := 3
-
-	// Current frame index inside the frameBuffer
-	currentIndex := 0
-
-	// State to check if the frame is frozen
-	freezeFrame := false
-
-	// Frame to compare with
-	mainFrame := gocv.NewMat()
-
-	// frozenFrame
-	frozenFrame := gocv.NewMat()
-
+	// Main program loop
 	for {
+		// Initialize and read current frame from device
 		currentFrame := gocv.NewMat()
 
 		if !ReadWebcamWithRetry(webcam, &currentFrame, maxCameraRetries) {
@@ -108,56 +70,51 @@ func main() {
 		}
 
 		// Close the Mat at the current buffer position to avoid memory leaks
-		if frameBuffer[currentIndex].Empty() == false {
-			frameBuffer[currentIndex].Close()
-		}
+		// if frameBuffer[currentIndex].Empty() == false {
+		// 	frameBuffer[currentIndex].Close()
+		// }
 
 		// Denoise currentFrame
-		gocv.FastNlMeansDenoisingColoredWithParams(currentFrame, &currentFrame, 28.0, 12.0, 12, 7)
+		// gocv.FastNlMeansDenoisingColoredWithParams(currentFrame, &currentFrame, 28.0, 12.0, 12, 7)
 
-		// Store the current frame in the buffer
-		frameBuffer[currentIndex] = currentFrame.Clone()
-		currentFrame.Close()
-
-		if !freezeFrame {
-			mainFrame = frameBuffer[currentIndex]
-			frozenFrame = frameBuffer[currentIndex]
-		} else {
-			mainFrame = frozenFrame
+		// Enqueue the current frame in the buffer
+		if !frameBuffer.Enqueue(currentFrame.Clone()) {
+			log.Fatal("CircularFrameBuffer is full")
 		}
 
-		// gocv.Multiply(mainFrame, gocv.NewMatWithSizeFromScalar(
-		// 	gocv.NewScalar(0.5, 0.5, 0.5, 0),
-		// 	mainFrame.Rows(),
-		// 	mainFrame.Cols(),
-		// 	mainFrame.Type()), &mainFrame)
+		currentFrame.Close()
 
-		// mainFrame.MultiplyFloat(0.5) //.CopyTo(&mainFrame)
-
-		// Determine the frame to blend with based on the desired delay
-		blendIndex := (currentIndex - blendOffset + frameBufferSize) % frameBufferSize
-		blendFrame := frameBuffer[blendIndex]
+		blendFrame := frameBuffer.CalcBlendFrame()
 
 		if !blendFrame.Empty() {
-			// Create a half-transparent inverted version of the frame to blend
+			// Calculate base frame
+			baseFrame := frameBuffer.BaseFrame()
+
+			// Create a half-transparent inverted version of the blending frame
 			halfTransparentFrame := gocv.NewMat()
 
-			// Invert the frame
+			// Invert current frame
 			gocv.BitwiseNot(blendFrame, &halfTransparentFrame)
-			gocv.AddWeighted(halfTransparentFrame, 0.5, mainFrame, 0.0, 0, &halfTransparentFrame)
+			gocv.AddWeighted(halfTransparentFrame, 0.5, baseFrame, 0.0, 0, &halfTransparentFrame)
 
 			// Blend the current frame with the delayed frame
 			blendedFrame := gocv.NewMat()
 
-			blendFrames(mainFrame, halfTransparentFrame, &blendedFrame, 0.4)
+			blendFrames(baseFrame, halfTransparentFrame, &blendedFrame, 0.4)
 
 			// Apply emobss effect
-			applyEmbossEffect(blendedFrame, &blendedFrame)
+			// applyEmbossEffect(blendedFrame, &blendedFrame)
 
 			// Calculate FPS
 			if fpsCalculator != nil {
 				fps := fpsCalculator.calculateFPS()
-				gocv.PutText(&blendedFrame, fmt.Sprintf("FPS: %.2f, Delay: %d (A/D keys to inc/dec), Freeze: %t", fps, blendOffset, freezeFrame), image.Pt(10, 40), gocv.FontHersheyPlain, 1.9, fpsCounterColor, 2)
+				gocv.PutText(&blendedFrame,
+					fmt.Sprintf("FPS: %.2f, Delay: %d (A/D keys to inc/dec), Freeze: %t",
+						fps,
+						frameBuffer.blendOffset,
+						frameBuffer.IsFrozen()),
+					image.Pt(10, 40),
+					gocv.FontHersheyPlain, 1.9, HUDColor, 2)
 			}
 
 			// Display the resulting frame in the window
@@ -169,22 +126,18 @@ func main() {
 		}
 
 		// Move to the next index in the circular buffer
-		currentIndex = (currentIndex + 1) % frameBufferSize
+		// frameBuffer.Dequeue()
 
 		// Handle user input to change the blend offset
 		key := window.WaitKey(10)
 		if key == 27 || key == 113 { // ESC or Q key to exit
 			break
 		} else if key == 97 { // "A" key decreses blendOffset
-			if blendOffset > minBlendOffset {
-				blendOffset--
-			}
+			frameBuffer.DecBlendOffset()
 		} else if key == 100 { // "D" key increses blendOffset
-			if blendOffset < maxBlendOffset {
-				blendOffset++
-			}
+			frameBuffer.IncBlendOffset()
 		} else if key == 32 { // Spacebar key to togle freeze frame
-			freezeFrame = !freezeFrame
+			frameBuffer.ToggleFreezeFrame()
 		}
 
 		time.Sleep(30 * time.Millisecond)

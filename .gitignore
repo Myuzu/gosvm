@@ -24,6 +24,8 @@ go.work.sum
 # env file
 .env
 
-bin/
+# debug binaries
+__debug_bin*
 
+bin/
 build/
