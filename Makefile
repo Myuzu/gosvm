@@ -13,3 +13,8 @@ clean:
 dep:
 	go mod download
 	go mod verify
+
+.PHONY: gdb
+gdb:
+	rm -f build/${BINARY_NAME}_gdb
+	go build -gcflags "-N -l" -o build/${BINARY_NAME}_gdb ./...
