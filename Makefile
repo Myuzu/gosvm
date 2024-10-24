@@ -2,6 +2,7 @@ BINARY_NAME=gosvm
 
 .PHONY: build
 build:
+	rm -f build/${BINARY_NAME}
 	go build -o build/${BINARY_NAME} ./...
 
 .PHONY: clean

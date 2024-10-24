@@ -126,7 +126,7 @@ func main() {
 		}
 
 		// Move to the next index in the circular buffer
-		// frameBuffer.Dequeue()
+		frameBuffer.Dequeue()
 
 		// Handle user input to change the blend offset
 		key := window.WaitKey(10)

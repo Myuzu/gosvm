@@ -66,15 +66,17 @@ func (cfb *CircularFrameBuffer) CalcBlendFrame() gocv.Mat {
 // Toggle FreezeFrame mode
 // In this mode BlendFrame would returns frozenFrame
 func (cfb *CircularFrameBuffer) ToggleFreezeFrame() bool {
-	if cfb.frozen {
+	if cfb.IsFrozen() {
 		cfb.frozen = false
 		// Delete and close frozenFrame
 		cfb.frozenFrame.Close()
+
 		return false
 	} else {
 		cfb.frozen = true
 		// Clone gocv.Mat from tail to frozenFrame
 		cfb.frozenFrame = cfb.frameBuffer[cfb.tail].Clone()
+
 		return true
 	}
 }
