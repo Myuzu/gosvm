@@ -3,12 +3,15 @@
   "packages": ["go@latest", "opencv@latest", "gdb@latest"],
   "env": {
     "PKG_CONFIG_PATH": "$DEVBOX_PACKAGES_DIR/lib/pkgconfig",
-    "GOPATH": "$DEVBOX_PROJECT_ROOT",
-    "PATH": "$PATH:$DEVBOX_PROJECT_ROOT/bin"
+    "GOPATH": "${PWD}/.devbox/virtenv/go",
+    "GOBIN": "${PWD}/.devbox/virtenv/go/bin",
+    "PATH": "${GOBIN}:${PATH}"
   },
   "shell": {
     "init_hook": [
       "echo 'Welcome to devbox!' > /dev/null",
+      "export GOMODCACHE=${PWD}/.devbox/virtenv/go/pkg/mod",
+      "export GOCACHE=${PWD}/.devbox/virtenv/go/cache",
       "go install github.com/go-delve/delve/cmd/dlv@latest"
     ],
     "scripts": {
