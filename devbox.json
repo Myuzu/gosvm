@@ -12,7 +12,8 @@
       "echo 'Welcome to devbox!' > /dev/null",
       "export GOMODCACHE=${PWD}/.devbox/virtenv/go/pkg/mod",
       "export GOCACHE=${PWD}/.devbox/virtenv/go/cache",
-      "go install github.com/go-delve/delve/cmd/dlv@latest"
+      "go install github.com/go-delve/delve/cmd/dlv@latest",
+      "go install honnef.co/go/tools/cmd/staticcheck@latest"
     ],
     "scripts": {
       "test": ["echo \"Error: no test specified\" && exit 1"]
